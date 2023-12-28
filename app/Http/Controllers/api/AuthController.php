@@ -5,6 +5,7 @@ namespace App\Http\Controllers\api;
 use App\Http\Controllers\Controller;
 use App\Mail\RegistroMailable;
 use App\Models\Usuarios;
+use App\Models\Autorizacion;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Illuminate\Support\Facades\Hash;
@@ -19,9 +20,9 @@ class AuthController extends Controller
         // return $$request;
         $request->validate([
             'nombres' => 'required',
-            'cedula' => 'required',
+            'cedula' => 'required|unique:tbl_adm_usuarios,cedula',
             'celular' => 'required',
-            'email' => 'required',
+            'email' => 'required|unique:tbl_adm_usuarios,email',
             'residencia' => 'required',
             'pass' => 'required',
             'conf_pass' => 'required',
@@ -77,7 +78,7 @@ class AuthController extends Controller
             $imagenBase64 = $request->fileselfie;
 
             if (strpos($imagenBase64, 'data:image/jpg;base64,') === 0 || strpos($imagenBase64, 'data:image/jpeg;base64,') === 0 || strpos($imagenBase64, 'data:image/png;base64,') === 0) {
-                
+
                 $datosImagen = substr($imagenBase64, strpos($imagenBase64, ',') + 1);
                 $extencion = pathinfo(parse_url($imagenBase64, PHP_URL_PATH), PATHINFO_EXTENSION);
 
@@ -146,22 +147,38 @@ class AuthController extends Controller
 
     public function login(Request $request)
     {
+
         $credentials = $request->validate([
             'cedula' => 'required',
             'contrasenia' => 'required',
         ]);
+
+
         try {
-            if (Auth::attempt(['cedula' => $credentials['cedula'], 'password' => $credentials['contrasenia']])) {
-                //  return response(["message" => "xxx"], Response::HTTP_UNAUTHORIZED);
-                $user = Auth::user();
-                $token = $user->createToken('token')->plainTextToken;
-                $cookie = cookie('cookie_token', $token, 60 * 24);
-                return response(["token" => $token], Response::HTTP_OK)->withoutCookie($cookie);
-            } else {
-                return response(["message" => "Credenciales inválidas"], Response::HTTP_UNAUTHORIZED);
+
+            $user = Usuarios::where('cedula', $credentials['cedula'])->first();
+
+            if (!$user || !Hash::check($credentials['contrasenia'], $user->pass)) {
+                return response(["msjResponse" => "Credenciales Incorrectas", "codResponse"=>"02"], Response::HTTP_UNAUTHORIZED);
             }
+
+            // Autenticación exitosa
+            $token = $user->createToken('token')->plainTextToken;
+            // Remover el prefijo "43|"
+            $token = explode('|', $token)[1];
+
+            $seguro = new Autorizacion();
+            $seguro->cedula = $credentials['cedula'];
+            $seguro->token = $token;
+            $seguro->save();
+
+            $cookie = cookie('cookie_token', $token, 60 * 24);
+
+
+
+            return response(["token" => $token,"msjResponse" => "Transaccion ok", "codResponse"=>"00"], Response::HTTP_OK)->withoutCookie($cookie);
         } catch (\Exception $e) {
-            return response()->json(['error' => $e->getMessage()], 500);
+            return response()->json(['msjResponse' => $e->getMessage(), "codResponse"=>"99"], 500);
         }
     }
     public function userProfile(Request $request)
